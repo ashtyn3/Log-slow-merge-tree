@@ -1,7 +1,7 @@
 import { FileIO } from "./file-manager";
 import { SuperblockManager } from "./superblock";
 import { WAL_Manager } from "./wal";
-import { LSM } from "./lsm-tree";
+import { LSM, TableReader } from "./lsm-tree";
 import { EventRing } from "./event-ring";
 import { TableIO } from "./lsm-tree";
 
@@ -36,34 +36,30 @@ if (fileSize === 0) {
 }
 
 // 3) Use EventRing
-const t = new LSM(8, tio);
-const er = new EventRing(t, wal, sbm);
-if (wal.getUsed() > 0) {
-    await t.recover(wal, er, sbm)
+const t = new LSM(2);
+const er = new EventRing(t, wal, tio, sbm);
+// if (wal.getUsed() > 0) {
+//     await t.recover(wal, er, sbm)
+// }
+
+// for (let i = 0; i < 3; i++) {
+//     const array = new Uint8Array(10);
+//     er.dispatch({
+//         op: "set",
+//         key: crypto.getRandomValues(array).toHex(),
+//         value: "hi",
+//         ts: 0,
+//         next: null,
+//     });
+// }
+// while (true) await er.runFor(10);
+
+console.log(await tio.aggHeads())
+const head = await tio.readEntryHead(1)
+const tr = new TableReader(io, tio, head)
+while (true) {
+    const kv = await tr.next()
+    if (kv === null) break;
+    console.log(kv.key.toHex(), new TextDecoder().decode(kv.value))
 }
-
-// await tio.popEntry()
-for (let i = 0; i < 5; i++) {
-    const array = new Uint32Array(10);
-
-    er.dispatch({
-        op: "set",
-        key: Bun.randomUUIDv7(),
-        value: crypto.getRandomValues(array).toString(),
-        ts: 0,
-        next: null,
-    });
-}
-er.dispatch({
-    op: "get",
-    key: "alice",
-    ts: 0,
-    next: null,
-    onComplete(r) {
-        console.log("got alice:", r);
-    },
-});
-
-// 4) Give it time to process (1 ms is often too short)
-while (true) await er.runFor(10);
 

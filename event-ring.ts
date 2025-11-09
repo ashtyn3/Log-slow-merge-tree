@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { IntrusiveQueue, type Link } from "./intrusive-queue";
-import { LSM } from "./lsm-tree";
+import { LSM, TableIO } from "./lsm-tree";
 import { WAL_Manager } from "./wal.ts";
 import { SuperblockManager } from "./superblock";
 import { type Op, MAX_INFLIGHT } from "./types";
@@ -20,7 +20,8 @@ export class EventRing {
     constructor(
         private tree: LSM,
         private walManager: WAL_Manager,
-        private sbManager?: SuperblockManager
+        private tio: TableIO,
+        private sbManager?: SuperblockManager,
     ) {
     }
 
@@ -32,8 +33,12 @@ export class EventRing {
     async submit(tree: LSM, op: Operation) {
         return new Promise<string>(async (r) => {
             switch (op.op) {
+                case "check": {
+                    setImmediate(() => this.walManager.checkpoint(this.walManager.getLastLSN(), this.sbManager!))
+                    return r("");
+                }
                 case "set": {
-                    await tree.put(op.key, op.value ?? "");
+                    await tree.put(this, op.key, op.value ?? "");
                     return r("");
                 }
                 case "get": {
@@ -48,6 +53,7 @@ export class EventRing {
     async runFor(ms: number) {
         const ms_dur = (ms * 1000000);
         const end = Bun.nanoseconds() + ms_dur;
+
 
         while (true) {
             if (Bun.nanoseconds() >= end) break;
@@ -75,6 +81,11 @@ export class EventRing {
                     op.onComplete?.(v);
                     r();
                 }));
+            }
+            if (this.tree.needsFlush()) {
+                await this.tio.flushWAL(this.tree.memTable)
+                this.tree.memTable.clear()
+                await this.walManager.checkpoint(this.walManager.getLastLSN(), this.sbManager!)
             }
         }
         // if (this.walManager.isDirty() && this.tree.needsCompaction()) {

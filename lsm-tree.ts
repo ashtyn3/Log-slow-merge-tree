@@ -7,6 +7,7 @@ import { WAL_Manager } from "./wal";
 import { createHash } from "node:crypto";
 import type { EventRing } from "./event-ring";
 import { OP_INV } from "./types";
+import type { IndexKind } from "typescript";
 
 const PREFIX = 16; // set to 32 if you want 32-byte min/max prefixes
 
@@ -17,6 +18,12 @@ const CAP = Math.floor((BLOCK - HEADER_SIZE) / ENTRY_SIZE);
 export const MANIFEST_OFF = WAL_Manager.J_START + WAL_Manager.J_LENGTH;
 
 type Extent = { startBlock: number; blocks: number };
+
+type IndexEntry = {
+    firstKey: Uint8Array;
+    off: number; // table-relative byte offset (u64 on disk)
+    len: number; // block length (u32 on disk)
+};
 
 type TableMeta = {
     id: string;
@@ -65,6 +72,137 @@ function encodeManifestEntry(me: ManifestEntry): Uint8Array {
     buf.set(me.minPrefix, o); o += PREFIX;
     buf.set(me.maxPrefix, o); o += PREFIX;
     return buf;
+}
+
+
+export function decodeIndex(buf: Uint8Array): IndexEntry[] {
+    const out: IndexEntry[] = [];
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let o = 0;
+    while (o + 2 + 8 + 4 <= buf.length) {
+        const klen = dv.getUint16(o, true); o += 2;
+        const off = Number(dv.getBigUint64(o, true)); o += 8;
+        const len = dv.getUint32(o, true); o += 4;
+
+        if (o + klen > buf.length) break; // tolerate padded tail or truncated view
+        const key = buf.subarray(o, o + klen);
+        o += klen;
+
+        out.push({ firstKey: new Uint8Array(key), off, len });
+    }
+    return out;
+}
+
+export function encodeTableMeta(meta: TableMeta): Uint8Array {
+    const enc = new TextEncoder();
+    if (meta.minKey.length !== PREFIX || meta.maxKey.length !== PREFIX) {
+        throw new Error(`minKey/maxKey must be ${PREFIX} bytes`);
+    }
+    const idBytes = enc.encode(meta.id);
+    const extCnt = meta.extents.length;
+
+    const headerLen =
+        2 + // id_len
+        2 + // level
+        8 + // seqMin
+        8 + // seqMax
+        8 + // sizeBytes
+        4 + // blockSize
+        8 + // indexOff
+        4 + // indexLen
+        4 + // entryCount
+        PREFIX + // minKey
+        PREFIX + // maxKey
+        4; // extents_count
+
+    const extentsLen = extCnt * (8 + 4); // startBlock u64 + blocks u32
+    const total = headerLen + idBytes.length + extentsLen;
+
+    const buf = new Uint8Array(total);
+    const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let o = 0;
+
+    v.setUint16(o, idBytes.length, true); o += 2;
+    v.setUint16(o, meta.level, true); o += 2;
+
+    v.setBigUint64(o, meta.seqMin, true); o += 8;
+    v.setBigUint64(o, meta.seqMax, true); o += 8;
+
+    v.setBigUint64(o, BigInt(meta.sizeBytes), true); o += 8;
+    v.setUint32(o, meta.blockSize >>> 0, true); o += 4;
+
+    v.setBigUint64(o, BigInt(meta.indexOff), true); o += 8;
+    v.setUint32(o, meta.indexLen >>> 0, true); o += 4;
+
+    v.setUint32(o, meta.entryCount >>> 0, true); o += 4;
+
+    buf.set(meta.minKey, o); o += PREFIX;
+    buf.set(meta.maxKey, o); o += PREFIX;
+
+    v.setUint32(o, extCnt >>> 0, true); o += 4;
+
+    // id bytes
+    buf.set(idBytes, o); o += idBytes.length;
+
+    // extents
+    for (const e of meta.extents) {
+        v.setBigUint64(o, BigInt(e.startBlock), true); o += 8;
+        v.setUint32(o, e.blocks >>> 0, true); o += 4;
+    }
+
+    return buf;
+}
+export function decodeTableMeta(buf: Uint8Array): TableMeta {
+    const dec = new TextDecoder();
+    const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let o = 0;
+
+    const idLen = v.getUint16(o, true); o += 2;
+    const level = v.getUint16(o, true); o += 2;
+
+    const seqMin = v.getBigUint64(o, true); o += 8;
+    const seqMax = v.getBigUint64(o, true); o += 8;
+
+    const sizeBytes = Number(v.getBigUint64(o, true)); o += 8;
+    const blockSize = v.getUint32(o, true); o += 4;
+
+    const indexOff = Number(v.getBigUint64(o, true)); o += 8;
+    const indexLen = v.getUint32(o, true); o += 4;
+
+    const entryCount = v.getUint32(o, true); o += 4;
+
+    const minKey = buf.subarray(o, o + PREFIX); o += PREFIX;
+    const maxKey = buf.subarray(o, o + PREFIX); o += PREFIX;
+
+    const extCnt = v.getUint32(o, true); o += 4;
+
+    if (o + idLen > buf.length) {
+        throw new Error("decodeTableMeta: truncated id");
+    }
+    const id = dec.decode(buf.subarray(o, o + idLen)); o += idLen;
+
+    const extents: Extent[] = [];
+    for (let i = 0; i < extCnt; i++) {
+        if (o + 8 + 4 > buf.length) throw new Error("decodeTableMeta: truncated extents");
+        const startBlock = Number(v.getBigUint64(o, true)); o += 8;
+        const blocks = v.getUint32(o, true); o += 4;
+        extents.push({ startBlock, blocks });
+    }
+
+    return {
+        id,
+        level,
+        minKey: new Uint8Array(minKey),
+        maxKey: new Uint8Array(maxKey),
+        seqMin,
+        seqMax,
+        extents,
+        sizeBytes,
+        blockSize,
+        indexOff,
+        indexLen,
+        entryCount,
+    };
 }
 
 export function encodeManifestPage(mp: ManifestPage): Uint8Array {
@@ -180,6 +318,15 @@ export function lt16(a: Uint8Array, b: Uint8Array): boolean {
 export function gt16(a: Uint8Array, b: Uint8Array): boolean {
     return cmp16(a, b) > 0;
 }
+
+export function between16(
+    x: Uint8Array,
+    loIncl: Uint8Array,
+    hiExcl: Uint8Array,
+): boolean {
+    return cmp16(x, loIncl) >= 0 && cmp16(x, hiExcl) < 0;
+}
+
 export class TableIO {
     private manifest: ManifestPage = { epoch: 0n, entries: [] };
     private tableTail: number = MANIFEST_OFF + BLOCK;
@@ -235,20 +382,32 @@ export class TableIO {
         this.updateManifest()
     }
 
-    private async requestTable(level: number, size: number, minPrefix: Uint8Array, maxPrefix: Uint8Array) {
-        const left = await this.file.size() - this.tableTail
-        if (this.tableTail + size > left) {
-            throw new Error("Cannot add another table. Needs compaction");
-        }
-        const e = {
-            level: level,
-            metaOff: BigInt(this.tableTail),
-            metaLen: this.tableTail + size,
+
+    private async requestTable(
+        level: number,
+        size: number,
+        minPrefix: Uint8Array,
+        maxPrefix: Uint8Array,
+    ) {
+        const fileBytes = await this.file.size();
+        const left = fileBytes - this.tableTail;
+        if (size > left) throw new Error("Cannot add another table. Needs compaction");
+
+        const metaOff = this.tableTail;
+        const metaLen = size; // length in bytes of the whole table blob you will write
+
+        const e: ManifestEntry = {
+            level,
+            metaOff: BigInt(metaOff),
+            metaLen,
             minPrefix,
-            maxPrefix
-        }
-        await this.addEntry(e)
-        return e
+            maxPrefix,
+        };
+        await this.addEntry(e);
+
+        // Reserve bytes by bumping the tail now (so next placement won’t overlap)
+        this.tableTail = alignUp(metaOff + metaLen, BLOCK);
+        return e;
     }
 
     concat(parts: Uint8Array[]) {
@@ -268,7 +427,7 @@ export class TableIO {
         // 1) Build data blocks (each <= BLOCK then padded to BLOCK)
         const blocks: Uint8Array[] = [];
         type IndexEntry = { firstKey: Uint8Array; off: number; len: number };
-        const index: IndexEntry[] = [];
+        let index: IndexEntry[] = [];
 
         let countInBlock = 0;
         let parts: Uint8Array[] = [];
@@ -300,6 +459,7 @@ export class TableIO {
             if (!minPrefix || lt16(p, minPrefix)) minPrefix = p;
             if (!maxPrefix || gt16(p, maxPrefix)) maxPrefix = p;
         };
+        let extents: Array<Extent> = [];
 
         const flushBlock = () => {
             if (countInBlock === 0) return;
@@ -335,77 +495,157 @@ export class TableIO {
         if (blocks.length === 0) return; // nothing to flush
 
         // 2) Build index (firstKeyLen u16 + firstKey + off u64 + len u32)*
+        // 
+
         const indexParts: Uint8Array[] = [];
         for (const e of index) {
             const hdr = new Uint8Array(2 + 8 + 4);
             const dv = new DataView(hdr.buffer);
             dv.setUint16(0, e.firstKey.length, true);
-            dv.setBigUint64(2, BigInt(e.off), true);
+            dv.setBigUint64(2, BigInt(e.off), true); // off is relative to dataStart
             dv.setUint32(10, e.len, true);
             indexParts.push(hdr, e.firstKey);
         }
         const indexRaw = this.concat(indexParts);
         const indexBuf = (() => {
             const need = alignUp(indexRaw.length, 8);
-            if (need === indexRaw.length) return indexRaw;
             const out = new Uint8Array(need);
             out.set(indexRaw, 0);
             return out;
         })();
-        const indexOff = blocks.reduce((s, b) => s + b.length, 0);
+        const indexLen = indexRaw.length;
+        const indexLenPadded = indexBuf.length;
 
-        // 3) Footer (indexOff u64, indexLen u32, entryCount u32, blockSize u16)
-        const footer = new Uint8Array(8 + 4 + 4 + 2);
-        const fv = new DataView(footer.buffer);
-        fv.setBigUint64(0, BigInt(indexOff), true);
-        fv.setUint32(8, indexRaw.length, true);
-        fv.setUint32(12, entryCount, true);
-        fv.setUint16(16, BLOCK, true);
+        const blockBytes = blocks.reduce((s, b) => s + b.length, 0);
+        const sizeBytes = BLOCK + indexLenPadded + blockBytes; // total table blob size
 
-        const tableBytes = this.concat([...blocks, indexBuf, footer]);
-        const sizeBytes = tableBytes.length;
-        const blocksNeeded = Math.ceil(sizeBytes / BLOCK);
-
-        console.log(`table bytes=${sizeBytes} blocks=${blocksNeeded}`);
-
-        const extents = await this.requestTable(
+        // Reserve space in file for the full blob
+        const entry = await this.requestTable(
             0,
             sizeBytes,
             minPrefix ?? new Uint8Array(16),
             maxPrefix ?? new Uint8Array(16),
         );
-        console.log(this.manifest)
-        // const tio = new ExtentIO(this.file, extents, BLOCK);
-        // await tio.write(0, tableBytes);
-        // await this.file.fsync();
-        //
-        // // 5) Build and store TableMeta, then WAL manifest update
-        // const meta: TableMeta = {
-        //     id: crypto.randomUUID(),
-        //     level: 0,
-        //     minKey: minPrefix ?? new Uint8Array(16),
-        //     maxKey: maxPrefix ?? new Uint8Array(16),
-        //     seqMin: 0n,
-        //     seqMax: 0n,
-        //     extents,
-        //     sizeBytes,
-        //     blockSize: BLOCK,
-        //     indexOff,
-        //     indexLen: indexRaw.length,
-        //     entryCount,
-        // };
+        const metaOff = Number(entry.metaOff);
+        const indexOff = metaOff + BLOCK;                 // absolute file offset
+        const dataStart = indexOff + indexLenPadded;      // absolute file offset
+
+        // TableMeta must use absolute indexOff and unpadded indexLen
+        const meta: TableMeta = {
+            id: crypto.randomUUID(),
+            level: 0,
+            minKey: minPrefix ?? new Uint8Array(16),
+            maxKey: maxPrefix ?? new Uint8Array(16),
+            seqMin: 0n,
+            seqMax: 0n,
+            extents: [],                // optional for this contiguous layout
+            sizeBytes,
+            blockSize: BLOCK,
+            indexOff,                   // absolute
+            indexLen,                   // unpadded
+            entryCount,
+        };
+
+        // Encode meta into one block
+        const encoded = encodeTableMeta(meta);
+        const alignedMetaBlock = new Uint8Array(BLOCK);
+        alignedMetaBlock.set(encoded, 0);
+
+        // Compose full table blob: [meta block][index][blocks]
+        const full = this.concat([alignedMetaBlock, indexBuf, ...blocks]);
+        if (full.byteLength !== entry.metaLen) {
+            throw new Error(`broken table size: ${full.byteLength} !== ${entry.metaLen}`);
+        }
+
+        // Write at reserved location
+        await this.file.write(metaOff, full);
+        await this.file.fsync();
+    }
+
+
+    async readEntryHead(i: number) {
+        const e = this.manifest.entries[i];
+        if (!e) throw new Error("entry doesn't exist");
+
+        const metaOff = Number(e.metaOff);
+        const metaBuf = await this.file.read(metaOff, BLOCK);
+        const table = decodeTableMeta(metaBuf);
+
+        const indexRaw = await this.file.read(table.indexOff, table.indexLen);
+        const idxRel = decodeIndex(indexRaw);
+
+        const dataStart = table.indexOff + alignUp(table.indexLen, 8);
+
+        const indexAbs = idxRel.map(ent => ({
+            firstKey: ent.firstKey,
+            off: dataStart + ent.off, // ABSOLUTE FILE OFFSET
+            len: ent.len,
+        }));
+
+        return { index: indexAbs, table };
+    }
+    async aggHeads() {
+        return await Promise.all(this.manifest.entries.map(async (_, i) => {
+            return this.readEntryHead(i)
+        }))
+    }
+}
+
+export class TableReader {
+    block: Uint8Array = new Uint8Array(0)
+    prevKey: Uint8Array = new Uint8Array(0)
+    count: number = 0
+    localPos: number = 0;
+    iter: number = 0;
+    i: number = 0;
+    constructor(private file: FileIO, private tio: TableIO, private meta: { index: IndexEntry[], table: TableMeta }) { }
+
+    async loadBlock(e: IndexEntry) {
+        this.block = await this.file.read(e.off, e.len);
+        const dv = new DataView(this.block.buffer, this.block.byteOffset);
+        this.count = dv.getUint16(0, true);
+        this.localPos = 2;
+        this.iter = 0;
+        this.prevKey = new Uint8Array(0);
+    }
+
+
+    async next() {
+        while (true) {
+            if (this.block.length === 0) {
+                if (this.i >= this.meta.index.length) return null;
+                await this.loadBlock(this.meta.index[this.i++]!);
+            }
+            if (this.iter >= this.count) {
+                this.block = new Uint8Array(0);
+                continue;
+            }
+
+            const dv = new DataView(this.block.buffer, this.block.byteOffset + this.localPos);
+            const klen = dv.getUint16(0, true);
+            const vlen = dv.getUint32(2, true);
+            this.localPos += 2 + 4;
+
+            const key = this.block.subarray(this.localPos, this.localPos + klen);
+            this.localPos += klen;
+            const value = this.block.subarray(this.localPos, this.localPos + vlen);
+            this.localPos += vlen;
+
+            this.iter++;
+            return { key, value };
+        }
     }
 }
 
 export class LSM {
-    private memTable = new BTree<string, string>();
+    memTable = new BTree<string, string>();
     max_size: number;
 
-    constructor(max: number = 8, private tio: TableIO) {
+    constructor(max: number = 8) {
         this.max_size = max;
     }
 
-    async recover(wal: WAL_Manager, er: EventRing, sbm: SuperblockManager) {
+    async recover(wal: WAL_Manager, sbm: SuperblockManager, er: EventRing) {
         const scan = wal.scan(wal.getHead(), wal.getUsed());
         (await scan).forEach((v) => {
             er.dispatch({
@@ -423,11 +663,8 @@ export class LSM {
         })
     }
 
-    async put(key: string, value: string) {
+    async put(er: EventRing, key: string, value: string) {
         this.memTable.set(key, value);
-        if (this.memTable.length > this.max_size) {
-            await this.tio.flushWAL(this.memTable)
-        }
     }
 
     get(key: string) {
@@ -435,7 +672,7 @@ export class LSM {
         if (inMem) return this.memTable.get(key);
     }
 
-    needsCompaction() {
-        if (this.memTable.size >= 10) return true
+    needsFlush() {
+        if (this.memTable.size >= this.max_size) return true
     }
 }
