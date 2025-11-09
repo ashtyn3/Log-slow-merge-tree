@@ -528,7 +528,6 @@ export class TableIO {
         );
         const metaOff = Number(entry.metaOff);
         const indexOff = metaOff + BLOCK;                 // absolute file offset
-        const dataStart = indexOff + indexLenPadded;      // absolute file offset
 
         // TableMeta must use absolute indexOff and unpadded indexLen
         const meta: TableMeta = {
