@@ -5,6 +5,7 @@ import { TableIO } from "./table";
 import { WAL_Manager } from "./wal.ts";
 import { SuperblockManager } from "./superblock";
 import { type Op, MAX_INFLIGHT } from "./types";
+import { log, LogLevel } from "./utils";
 
 export type Operation = Link<Operation> & {
     op: Op,
@@ -28,6 +29,7 @@ export class EventRing {
 
     dispatch(op: Operation) {
         op.ts = Bun.nanoseconds();
+        log(LogLevel.debug, "Operation dispatched", { op: op.op, key: op.key });
         this.q.push(op);
     }
 

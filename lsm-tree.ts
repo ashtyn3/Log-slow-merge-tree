@@ -3,6 +3,7 @@ import { SuperblockManager } from "./superblock";
 import { WAL_Manager } from "./wal";
 import type { EventRing } from "./event-ring";
 import { OP_INV } from "./types";
+import { log, LogLevel } from "./utils";
 
 export class LSM {
     memTable = new BTree<string, string>();
@@ -14,8 +15,9 @@ export class LSM {
 
     async recover(wal: WAL_Manager, sbm: SuperblockManager, er: EventRing) {
         const scan = wal.scan(wal.getHead(), wal.getUsed());
-        console.log(`found: requests=${(await scan).length} bytes=${wal.getUsed()}`);
-        (await scan).forEach((v) => {
+        const requests = await scan;
+        log(LogLevel.info, "Starting recovery", { requests: requests.length, bytes: wal.getUsed() });
+        requests.forEach((v) => {
             er.dispatch({
                 op: OP_INV[v.op]!,
                 key: v.key,

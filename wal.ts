@@ -4,6 +4,8 @@ import { OP, OP_INV } from "./types";
 import { BLOCK, type FileIO } from "./file-manager";
 import type { Operation } from "./event-ring";
 import type { SuperblockManager } from "./superblock";
+import { log, LogLevel } from "./utils";
+import { log, LogLevel } from "./utils";
 
 export class WAL_Manager {
     // Layout constants
@@ -145,6 +147,7 @@ export class WAL_Manager {
         const needTotal = batchBytes + (needsWrap ? padBytes : 0);
 
         if (free < needTotal) {
+            log(LogLevel.err, "WAL full", { free, need: needTotal, batch: batchBytes, wrap: needsWrap });
             throw new Error(
                 `WAL full: free=${free} (${(free / BLOCK) | 0} blocks) ` +
                 `need=${needTotal} (${(needTotal / BLOCK) | 0} blocks) ` +
@@ -173,6 +176,8 @@ export class WAL_Manager {
         this.tail = off === this.jEnd ? this.jStart : off;
         this.lsn = next;
 
+        log(LogLevel.debug, "Appended batch to WAL", { count: items.length, lastLSN: next });
+
         await this.file.fsync(); // per durability policy
         return next; // last LSN in this batch (use for checkpoint)
     }
@@ -180,12 +185,14 @@ export class WAL_Manager {
     async checkpoint(lsn: bigint, sbm: SuperblockManager) {
         const offset = this.lsnToEnd.get(lsn)
         if (offset === undefined) {
+            log(LogLevel.err, "Checkpoint failed: LSN not found", { lsn });
             throw new Error(`cannot checkpoint: LSN ${lsn} not found`);
         }
         this.head = offset; // may equal jStart if we ended exactly at J_END
         for (const k of this.lsnToEnd.keys()) {
             if (k <= offset) this.lsnToEnd.delete(k);
         }
+        log(LogLevel.info, "Checkpointed WAL", { lsn });
         await sbm.checkpoint({
             checkpointLSN: lsn,
             jHead: BigInt(this.head),

@@ -30,3 +30,16 @@ export function between16(
 ): boolean {
     return cmp16(x, loIncl) >= 0 && cmp16(x, hiExcl) < 0;
 }
+
+export enum LogLevel {
+    debug = 0,
+    info = 1,
+    warn = 2,
+    err = 3,
+}
+
+export function log(level: LogLevel, message: string, ...args: any[]) {
+    const levelStr = LogLevel[level].toUpperCase();
+    const timestamp = new Date().toISOString();
+    console.error(`${timestamp} ${levelStr}: ${message}`, ...args);
+}

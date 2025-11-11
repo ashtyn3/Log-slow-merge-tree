@@ -3,7 +3,7 @@ import { BLOCK } from "./superblock";
 import { alignUp, type FileIO } from "./file-manager";
 import { MANIFEST_OFF } from "./manifest";
 import type { Extent, IndexEntry, TableMeta, ManifestEntry, ManifestPage } from "./types";
-import { extractSortKey16, cmp16, lt16, gt16 } from "./utils";
+import { extractSortKey16, cmp16, lt16, gt16, log, LogLevel } from "./utils";
 import { encodeManifestPage, decodeManifestPage } from "./manifest";
 
 export function decodeIndex(buf: Uint8Array): IndexEntry[] {
@@ -231,6 +231,7 @@ export class TableIO {
     //
 
     async flushWAL(tree: BTree<string, string>) {
+        log(LogLevel.info, "Starting table flush", { entryCount: tree.size });
         let enc = new TextEncoder()
         const blocks: Uint8Array[] = [];
         type IndexEntryLocal = { firstKey: Uint8Array; off: number; len: number };
@@ -369,6 +370,7 @@ export class TableIO {
         // Write at reserved location
         await this.file.write(metaOff, full);
         await this.file.fsync();
+        log(LogLevel.info, "Table flushed", { id: meta.id, sizeBytes, entryCount });
     }
 
 
@@ -377,7 +379,7 @@ export class TableIO {
         if (!e) throw new Error("entry doesn't exist");
 
         if (this.map.has(e.metaOff)) {
-            console.log(`Hit head cache: saved=${e.metaLen} bytes`)
+            log(LogLevel.debug, "Head cache hit", { saved: e.metaLen })
             return this.map.get(e.metaOff)!
         }
 
