@@ -120,7 +120,7 @@ export class WAL_Manager {
     // Append a batch; handles wrap; updates tail and LSNs
     async appendMany(items: Operation[]): Promise<bigint> {
         // Map op to a number if needed
-        const toNumOp = (op: any) => (typeof op === "number" ? op : OP[op]);
+        const toNumOp = (op: Op) => OP[op];
 
         // Pre-encode records with contiguous LSNs
         let next = this.lsn;

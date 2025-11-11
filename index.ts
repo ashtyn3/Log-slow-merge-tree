@@ -1,9 +1,10 @@
 import { FileIO } from "./file-manager";
 import { SuperblockManager } from "./superblock";
 import { WAL_Manager } from "./wal";
-import { extractSortKey16, LSM, TableReader } from "./lsm-tree";
+import { LSM } from "./lsm-tree";
 import { EventRing } from "./event-ring";
-import { TableIO } from "./lsm-tree";
+import { TableIO, TableReader } from "./table";
+import { extractSortKey16 } from "./utils";
 
 
 const path = "wal.bin";
@@ -58,12 +59,12 @@ async function fill(a: number) {
 
 // await fill(50)
 
-for (const head of await tio.aggHeads()) {
+for (const head of await tio.aggHeads(0)) {
     console.log()
     console.log("====")
     console.log(head.table.id)
     console.log("====")
-    const tr = new TableReader(io, tio, head)
+    const tr = new TableReader(io, head)
     while (true) {
         const kv = await tr.next()
         if (kv === null) break;
@@ -73,3 +74,4 @@ for (const head of await tio.aggHeads()) {
     console.log("entry count:", head.table.entryCount)
     console.log("max:", head.table.maxKey.toHex(), "min:", head.table.minKey.toHex())
 }
+console.log(await tio.levelSize(0))

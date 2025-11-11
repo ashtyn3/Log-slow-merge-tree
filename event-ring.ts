@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { IntrusiveQueue, type Link } from "./intrusive-queue";
-import { LSM, TableIO } from "./lsm-tree";
+import { LSM } from "./lsm-tree";
+import { TableIO } from "./table";
 import { WAL_Manager } from "./wal.ts";
 import { SuperblockManager } from "./superblock";
 import { type Op, MAX_INFLIGHT } from "./types";
