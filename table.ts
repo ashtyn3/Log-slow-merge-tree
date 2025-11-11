@@ -232,14 +232,12 @@ export class TableIO {
 
     async flushWAL(tree: BTree<string, string>) {
         let enc = new TextEncoder()
-        // 1) Build data blocks (each <= BLOCK then padded to BLOCK)
         const blocks: Uint8Array[] = [];
         type IndexEntryLocal = { firstKey: Uint8Array; off: number; len: number };
         let index: IndexEntryLocal[] = [];
 
         let countInBlock = 0;
         let parts: Uint8Array[] = [];
-        // block header: count u16
         let curSize = 2;
         let firstKeyThisBlock: Uint8Array | null = null;
 
@@ -308,8 +306,6 @@ export class TableIO {
 
         if (blocks.length === 0) return; // nothing to flush
 
-        // 2) Build index (firstKeyLen u16 + firstKey + off u64 + len u32)*
-        //
 
         const indexParts: Uint8Array[] = [];
         for (const e of index) {
@@ -341,7 +337,7 @@ export class TableIO {
             maxPrefix ?? new Uint8Array(16),
         );
         const metaOff = Number(entry.metaOff);
-        const indexOff = metaOff + BLOCK;                 // absolute file offset
+        const indexOff = metaOff + BLOCK;
 
         // TableMeta must use absolute indexOff and unpadded indexLen
         const meta: TableMeta = {
@@ -351,7 +347,7 @@ export class TableIO {
             maxKey: maxPrefix ?? new Uint8Array(16),
             seqMin: 0n,
             seqMax: 0n,
-            extents: [],                // optional for this contiguous layout
+            extents: [],
             sizeBytes,
             blockSize: BLOCK,
             indexOff,                   // absolute
