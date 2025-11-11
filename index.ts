@@ -1,7 +1,7 @@
 import { FileIO } from "./file-manager";
 import { SuperblockManager } from "./superblock";
 import { WAL_Manager } from "./wal";
-import { LSM, TableReader } from "./lsm-tree";
+import { extractSortKey16, LSM, TableReader } from "./lsm-tree";
 import { EventRing } from "./event-ring";
 import { TableIO } from "./lsm-tree";
 
@@ -35,31 +35,41 @@ if (fileSize === 0) {
     wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
 }
 
-// 3) Use EventRing
-const t = new LSM(2);
+const t = new LSM(48);
 const er = new EventRing(t, wal, tio, sbm);
-// if (wal.getUsed() > 0) {
-//     await t.recover(wal, er, sbm)
-// }
-
-// for (let i = 0; i < 3; i++) {
-//     const array = new Uint8Array(10);
-//     er.dispatch({
-//         op: "set",
-//         key: crypto.getRandomValues(array).toHex(),
-//         value: "hi",
-//         ts: 0,
-//         next: null,
-//     });
-// }
-// while (true) await er.runFor(10);
-
-console.log(await tio.aggHeads())
-const head = await tio.readEntryHead(1)
-const tr = new TableReader(io, tio, head)
-while (true) {
-    const kv = await tr.next()
-    if (kv === null) break;
-    console.log(kv.key.toHex(), new TextDecoder().decode(kv.value))
+if (wal.getUsed() > 0) {
+    console.log("recovering")
+    await t.recover(wal, sbm, er)
 }
 
+async function fill(a: number) {
+    for (let i = 0; i < a; i++) {
+        const array = new Uint8Array(10);
+        er.dispatch({
+            op: "set",
+            key: crypto.getRandomValues(array).toBase64(),
+            value: "hi",
+            ts: 0,
+            next: null,
+        });
+    }
+    while (true) await er.runFor(10);
+}
+
+// await fill(50)
+
+for (const head of await tio.aggHeads()) {
+    console.log()
+    console.log("====")
+    console.log(head.table.id)
+    console.log("====")
+    const tr = new TableReader(io, tio, head)
+    while (true) {
+        const kv = await tr.next()
+        if (kv === null) break;
+        console.log(kv.key.toHex(), new TextDecoder().decode(kv.value))
+        console.log("\tsort key:", extractSortKey16(kv.key).toHex())
+    }
+    console.log("entry count:", head.table.entryCount)
+    console.log("max:", head.table.maxKey.toHex(), "min:", head.table.minKey.toHex())
+}

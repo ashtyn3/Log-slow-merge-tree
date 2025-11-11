@@ -152,6 +152,7 @@ export function encodeTableMeta(meta: TableMeta): Uint8Array {
 
     return buf;
 }
+
 export function decodeTableMeta(buf: Uint8Array): TableMeta {
     const dec = new TextDecoder();
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -485,11 +486,24 @@ export class TableIO {
             firstKeyThisBlock = null;
         };
 
-        tree.forEachPair((k, v) => {
-            const kb = enc.encode(k);
-            const vb = enc.encode(v);
-            pushRecord(kb, vb);
-        });
+        tree.toArray().sort(([k, v], [k2, v2]) => {
+            const k_b = enc.encode(k)
+            const k2_b = enc.encode(k2)
+            const k1_sorter = extractSortKey16(k_b)
+            const k2_sorter = extractSortKey16(k2_b)
+            return cmp16(k1_sorter, k2_sorter)
+        }).forEach(([k, v]) => {
+            const kb = enc.encode(k)
+            const vb = enc.encode(v)
+            pushRecord(kb, vb)
+        })
+
+        //     .forEachPair((k, v) => {
+        //     const kb = enc.encode(k);
+        //     const vb = enc.encode(v);
+        //     pushRecord(kb, vb);
+        // });
+        //
         flushBlock();
 
         if (blocks.length === 0) return; // nothing to flush
@@ -646,6 +660,7 @@ export class LSM {
 
     async recover(wal: WAL_Manager, sbm: SuperblockManager, er: EventRing) {
         const scan = wal.scan(wal.getHead(), wal.getUsed());
+        console.log(`found: requests=${(await scan).length} bytes=${wal.getUsed()}`);
         (await scan).forEach((v) => {
             er.dispatch({
                 op: OP_INV[v.op]!,
