@@ -48,10 +48,13 @@ export class WAL_Manager {
     }
 
     // Boot from known jHead/jTail/LSN (e.g., after reading superblock+scan)
-    initFrom(head: number, tail: number, lastLSN: bigint) {
+    async initFrom(head: number, tail: number, lastLSN: bigint) {
         this.head = head;
         this.tail = tail;
         this.lsn = lastLSN;
+        for (const e of await this.scan(this.head, this.tail)) {
+            this.lsnToEnd.set(e.lsn, this.head + e.off);
+        }
     }
 
     // Encode one record (aligned)
@@ -230,11 +233,11 @@ export class WAL_Manager {
     }
 
     async scan(from: number, maxBytes: number): Promise<
-        Array<{ lsn: bigint; op: number; key: string; value?: string }>
+        Array<{ lsn: bigint; op: number; key: string; value?: string, off: number }>
     > {
         const buf = await this.file.read(from, maxBytes);
         const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-        const out: Array<{ lsn: bigint; op: number; key: string; value?: string }> =
+        const out: Array<{ lsn: bigint; op: number; key: string; value?: string, off: number }> =
             [];
 
         let off = 0;
@@ -246,7 +249,7 @@ export class WAL_Manager {
                 off = r.next;
                 continue;
             }
-            out.push({ lsn: r.lsn, op: r.op, key: r.key, value: r.value });
+            out.push({ lsn: r.lsn, op: r.op, key: r.key, value: r.value, off });
             off = r.next;
         }
         return out;

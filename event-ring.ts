@@ -57,7 +57,6 @@ export class EventRing {
         const ms_dur = (ms * 1000000);
         const end = Bun.nanoseconds() + ms_dur;
 
-
         while (true) {
             if (Bun.nanoseconds() >= end) break;
 
@@ -68,7 +67,11 @@ export class EventRing {
                 continue;
             }
 
-            await this.walManager.appendMany(batch)
+            if (this.tree.recoverFlush > 0n) {
+                this.tree.recoverFlush = BigInt(-1)
+            } else {
+                await this.walManager.appendMany(batch)
+            }
 
             if (this.sbManager) {
                 await this.sbManager.checkpoint({
@@ -77,6 +80,7 @@ export class EventRing {
                     jTail: BigInt(this.walManager.getTail()),
                 });
             }
+
 
             for (const op of batch) {
                 await new Promise<void>((r) => setImmediate(async () => {

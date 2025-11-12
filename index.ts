@@ -34,7 +34,7 @@ if (fileSize === 0) {
     // Load SB and init WAL tail/head/lsn
     const sb = await sbm.load();
     tio = await tio.load()
-    wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
+    await wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
 }
 
 const t = new LSM(8);
@@ -43,7 +43,7 @@ if (wal.getUsed() > 0) {
     await t.recover(wal, sbm, er)
 }
 
-async function fill(a: number) {
+function fill(a: number) {
     for (let i = 0; i < a; i++) {
         er.dispatch({
             op: "set",
@@ -53,12 +53,32 @@ async function fill(a: number) {
             next: null,
         });
     }
+}
+
+
+function set(k: string, v: string) {
+    er.dispatch({
+        op: "set",
+        key: k,
+        value: v,
+        ts: 0,
+        next: null,
+    });
+}
+
+
+async function proc() {
     while (true) {
+        console.log(t.memTable.toArray())
         await er.runFor(10);
     }
 }
 
-await fill(2)
+// set("bob", "steve")
+// set("yo", "steve")
+// await fill(2)
+proc()
+
 
 let readers = []
 for (const head of await tio.aggHeads(0)) {

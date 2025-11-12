@@ -8,7 +8,7 @@ import { log, LogLevel } from "./utils";
 export class LSM {
     memTable = new BTree<string, string>();
     max_size: number;
-    recoverFlush = false
+    recoverFlush: bigint = BigInt(-1)
 
     constructor(max: number = 8) {
         this.max_size = max;
@@ -18,6 +18,8 @@ export class LSM {
         const scan = wal.scan(wal.getHead(), wal.getUsed());
         const requests = await scan;
         log(LogLevel.info, "Starting recovery", { requests: requests.length, bytes: wal.getUsed() });
+        const beforeRecov = wal.getLastLSN()
+        this.recoverFlush = beforeRecov
         requests.forEach((v) => {
             er.dispatch({
                 op: OP_INV[v.op]!,
@@ -45,6 +47,6 @@ export class LSM {
     }
 
     needsFlush() {
-        if (this.memTable.size >= this.max_size || this.recoverFlush) return true
+        if (this.memTable.size >= this.max_size) return true
     }
 }
