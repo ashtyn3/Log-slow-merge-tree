@@ -8,6 +8,7 @@ import { log, LogLevel } from "./utils";
 export class LSM {
     memTable = new BTree<string, string>();
     max_size: number;
+    recoverFlush = false
 
     constructor(max: number = 8) {
         this.max_size = max;
@@ -25,12 +26,13 @@ export class LSM {
                 next: null,
                 ts: 0,
                 onComplete() {
-                    if (wal.getUsed() > 0) {
-                        wal.checkpoint(wal.getLastLSN(), sbm)
-                    }
+                    // if (wal.getUsed() > 0) {
+                    //     wal.checkpoint(wal.getLastLSN(), sbm)
+                    // }
                 }
             })
         })
+        // this.recoverFlush = true
     }
 
     async put(er: EventRing, key: string, value: string) {
@@ -43,6 +45,6 @@ export class LSM {
     }
 
     needsFlush() {
-        if (this.memTable.size >= this.max_size) return true
+        if (this.memTable.size >= this.max_size || this.recoverFlush) return true
     }
 }

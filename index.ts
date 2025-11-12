@@ -39,10 +39,9 @@ if (fileSize === 0) {
 
 const t = new LSM(8);
 const er = new EventRing(t, wal, tio, sbm);
-// if (wal.getUsed() > 0) {
-//     console.log("recovering")
-//     await t.recover(wal, sbm, er)
-// }
+if (wal.getUsed() > 0) {
+    await t.recover(wal, sbm, er)
+}
 
 async function fill(a: number) {
     for (let i = 0; i < a; i++) {
@@ -59,7 +58,7 @@ async function fill(a: number) {
     }
 }
 
-await fill(16)
+await fill(2)
 
 let readers = []
 for (const head of await tio.aggHeads(0)) {

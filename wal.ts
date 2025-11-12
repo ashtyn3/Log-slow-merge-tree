@@ -5,7 +5,6 @@ import { BLOCK, type FileIO } from "./file-manager";
 import type { Operation } from "./event-ring";
 import type { SuperblockManager } from "./superblock";
 import { log, LogLevel } from "./utils";
-import { log, LogLevel } from "./utils";
 
 export class WAL_Manager {
     // Layout constants
@@ -45,14 +44,11 @@ export class WAL_Manager {
         this.tail = this.jStart;
     }
 
-    // Formatting (first run)
     async format(totalSizeBytes: number) {
         await this.file.ensureSize(totalSizeBytes);
-        // jHead = jTail = J_START for a fresh file
         this.head = this.jStart;
         this.tail = this.jStart;
         this.lsn = 0n;
-        // If you keep superblocks, write them here (omitted for brevity)
     }
 
     // Boot from known jHead/jTail/LSN (e.g., after reading superblock+scan)
@@ -121,7 +117,6 @@ export class WAL_Manager {
 
     // Append a batch; handles wrap; updates tail and LSNs
     async appendMany(items: Operation[]): Promise<bigint> {
-        // Map op to a number if needed
         const toNumOp = (op: Op) => OP[op];
 
         // Pre-encode records with contiguous LSNs
@@ -142,7 +137,6 @@ export class WAL_Manager {
         const used = this.getUsed()
         const free = regionBytes - used;
 
-        // Will this batch cross the end?
         const needsWrap = this.tail + batchBytes > this.jEnd;
         const needTotal = batchBytes + (needsWrap ? padBytes : 0);
 
@@ -155,14 +149,12 @@ export class WAL_Manager {
             );
         }
 
-        // If we cross the end, write PAD and wrap to jStart
         if (needsWrap) {
             const pad = this.encodePad(this.lsn); // PAD doesn't consume an LSN
             await this.file.write(this.tail, pad);
             this.tail = this.jStart;
         }
 
-        // Write records and remember end offsets for checkpointing
         let off = this.tail;
         for (const r of recs) {
             await this.file.write(off, r.buf);
@@ -172,7 +164,6 @@ export class WAL_Manager {
             this.lsnToEnd.set(r.lsn, normEnd);
         }
 
-        // Update pointers and last LSN
         this.tail = off === this.jEnd ? this.jStart : off;
         this.lsn = next;
 
@@ -200,8 +191,6 @@ export class WAL_Manager {
         });
     }
 
-    // Decode one record at offset; returns next offset and decoded entry
-    // If PAD encountered, returns kind: "pad" and next = aligned header end.
     decodeAt(view: DataView, offset: number):
         | { kind: "pad"; next: number }
         | { kind: "entry"; next: number; lsn: bigint; op: number; key: string; value?: string }
@@ -244,7 +233,6 @@ export class WAL_Manager {
         };
     }
 
-    // Simple scanner from a given offset (e.g., head) until a limit or invalid
     async scan(from: number, maxBytes: number): Promise<
         Array<{ lsn: bigint; op: number; key: string; value?: string }>
     > {
@@ -268,7 +256,6 @@ export class WAL_Manager {
         return out;
     }
 
-    // Getters for persisting to superblock
     getHead(): number {
         return this.head;
     }
@@ -284,7 +271,6 @@ export class WAL_Manager {
         return false
     }
 
-    // Advance head after checkpoint to cut the log (no truncation)
     advanceHeadTo(offset: number) {
         // must be within [jStart, jEnd) and aligned
         this.head = offset;
