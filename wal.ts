@@ -1,4 +1,3 @@
-import { appendFileSync, readFileSync } from "node:fs";
 import type { Op } from "./types";
 import { OP, OP_INV } from "./types";
 import { BLOCK, type FileIO } from "./file-manager";
@@ -7,7 +6,6 @@ import type { SuperblockManager } from "./superblock";
 import { log, LogLevel } from "./utils";
 
 export class WAL_Manager {
-    // Layout constants
     static readonly BLOCK = 4096;
     static readonly SB_A_OFF = 0;
     static readonly SB_B_OFF = WAL_Manager.BLOCK;
@@ -15,15 +13,13 @@ export class WAL_Manager {
     static readonly J_LENGTH = 256 * 4096;
     lsnToEnd = new Map<bigint, number>();
 
-    // Align helpers
     private alignUp(n: number, a = 8): number {
         return (n + (a - 1)) & ~(a - 1);
     }
 
-    // State
     private lsn: bigint = 0n;
-    private head: number; // byte offset inside journal region
-    private tail: number; // byte offset inside journal region
+    private head: number; // head offset of WAL ring (moved on checkpoint)
+    private tail: number; // tail offset of WAL ring
     private readonly jStart: number;
     private readonly jEnd: number;
 
