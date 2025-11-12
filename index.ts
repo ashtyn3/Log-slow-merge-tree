@@ -69,14 +69,13 @@ function set(k: string, v: string) {
 
 async function proc() {
     while (true) {
-        console.log(t.memTable.toArray())
         await er.runFor(10);
     }
 }
 
 // set("bob", "steve")
 // set("yo", "steve")
-// await fill(2)
+// fill(8)
 proc()
 
 
