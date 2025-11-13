@@ -1,6 +1,5 @@
 import { open as openFile, type FileHandle } from "node:fs/promises";
-
-export const BLOCK = 4096;
+import { BLOCK, FILE_RESULT, DatabaseError } from "./constants";
 
 export const alignUp = (n: number, blk = BLOCK) =>
     (n + (blk - 1)) & ~(blk - 1);
@@ -49,7 +48,7 @@ export class FileIO {
         let filled = 0;
         while (filled < len) {
             const { bytesRead } = await this.fh.read(out, filled, len - filled, offset + filled);
-            if (bytesRead === 0) throw new Error("short read");
+            if (bytesRead === 0) throw new DatabaseError(FILE_RESULT.SHORT_READ, "short read");
             filled += bytesRead;
         }
         return out;

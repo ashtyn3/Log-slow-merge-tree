@@ -1,10 +1,11 @@
-import BTree from "sorted-btree";
-import { BLOCK } from "./superblock";
+import BTree from "./b_tree/b_tree.ts";
+import { BLOCK } from "./constants";
 import { alignUp, type FileIO } from "./file-manager";
-import { MANIFEST_OFF } from "./manifest";
+import { MANIFEST_OFF } from "./constants";
 import type { Extent, IndexEntry, TableMeta, ManifestEntry, ManifestPage } from "./types";
 import { extractSortKey16, cmp16, lt16, gt16, log, LogLevel } from "./utils";
 import { encodeManifestPage, decodeManifestPage } from "./manifest";
+import { PREFIX, ENTRY_SIZE, TABLE_RESULT, DatabaseError } from "./constants";
 
 export function decodeIndex(buf: Uint8Array): IndexEntry[] {
     const out: IndexEntry[] = [];
@@ -26,9 +27,8 @@ export function decodeIndex(buf: Uint8Array): IndexEntry[] {
 
 export function encodeTableMeta(meta: TableMeta): Uint8Array {
     const enc = new TextEncoder();
-    const PREFIX = 16;
     if (meta.minKey.length !== PREFIX || meta.maxKey.length !== PREFIX) {
-        throw new Error(`minKey/maxKey must be ${PREFIX} bytes`);
+        throw new DatabaseError(TABLE_RESULT.INVALID_KEY_SIZE, `minKey/maxKey must be ${PREFIX} bytes`);
     }
     const idBytes = enc.encode(meta.id);
     const extCnt = meta.extents.length;
@@ -87,7 +87,6 @@ export function encodeTableMeta(meta: TableMeta): Uint8Array {
 
 export function decodeTableMeta(buf: Uint8Array): TableMeta {
     const dec = new TextDecoder();
-    const PREFIX = 16;
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     let o = 0;
 
@@ -111,13 +110,13 @@ export function decodeTableMeta(buf: Uint8Array): TableMeta {
     const extCnt = v.getUint32(o, true); o += 4;
 
     if (o + idLen > buf.length) {
-        throw new Error("decodeTableMeta: truncated id");
+        throw new DatabaseError(TABLE_RESULT.TRUNCATED_ID, "decodeTableMeta: truncated id");
     }
     const id = dec.decode(buf.subarray(o, o + idLen)); o += idLen;
 
     const extents: Extent[] = [];
     for (let i = 0; i < extCnt; i++) {
-        if (o + 8 + 4 > buf.length) throw new Error("decodeTableMeta: truncated extents");
+        if (o + 8 + 4 > buf.length) throw new DatabaseError(TABLE_RESULT.TRUNCATED_EXTENTS, "decodeTableMeta: truncated extents");
         const startBlock = Number(v.getBigUint64(o, true)); o += 8;
         const blocks = v.getUint32(o, true); o += 4;
         extents.push({ startBlock, blocks });
@@ -184,7 +183,7 @@ export class TableIO {
         await this.file.fsync();
     }
     private async addEntry(e: ManifestEntry) {
-        if (this.manifest.entries.length >= Math.floor((BLOCK - 16) / 48)) throw new Error("Ran out of manifest entries")
+        if (this.manifest.entries.length >= Math.floor((BLOCK - 16) / 48)) throw new DatabaseError(TABLE_RESULT.MANIFEST_FULL, "Ran out of manifest entries")
         this.manifest.entries.push(e)
         this.updateManifest()
         await this.file.write(this.manifestEntryTail, encodeManifestEntry(e))
@@ -199,7 +198,7 @@ export class TableIO {
     ) {
         const fileBytes = await this.file.size();
         const left = fileBytes - this.tableTail;
-        if (size > left) throw new Error("Cannot add another table. Needs compaction");
+        if (size > left) throw new DatabaseError(TABLE_RESULT.NEEDS_COMPACTION, "Cannot add another table. Needs compaction");
 
         const metaOff = this.tableTail;
         const metaLen = size; // length in bytes of the whole table blob you will write
@@ -364,7 +363,7 @@ export class TableIO {
         // Compose full table blob: [meta block][index][blocks]
         const full = this.concat([alignedMetaBlock, indexBuf, ...blocks]);
         if (full.byteLength !== entry.metaLen) {
-            throw new Error(`broken table size: ${full.byteLength} !== ${entry.metaLen}`);
+            throw new DatabaseError(TABLE_RESULT.BROKEN_TABLE_SIZE, `broken table size: ${full.byteLength} !== ${entry.metaLen}`);
         }
 
         // Write at reserved location
@@ -376,7 +375,7 @@ export class TableIO {
 
     async readEntryHead(i: number) {
         const e = this.manifest.entries[i];
-        if (!e) throw new Error("entry doesn't exist");
+        if (!e) throw new DatabaseError(TABLE_RESULT.ENTRY_NOT_EXIST, "entry doesn't exist");
 
         if (this.map.has(e.metaOff)) {
             log(LogLevel.debug, "Head cache hit", { saved: e.metaLen })
@@ -464,11 +463,9 @@ export class TableReader {
 }
 
 function encodeManifestEntry(me: ManifestEntry): Uint8Array {
-    const PREFIX = 16;
     if (me.minPrefix.length !== PREFIX || me.maxPrefix.length !== PREFIX) {
-        throw new Error(`prefixes must be exactly ${PREFIX} bytes`);
+        throw new DatabaseError(TABLE_RESULT.INVALID_PREFIX_SIZE, `prefixes must be exactly ${PREFIX} bytes`);
     }
-    const ENTRY_SIZE = 48;
     const buf = new Uint8Array(ENTRY_SIZE);
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     let o = 0;

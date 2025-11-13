@@ -1,17 +1,10 @@
-import { BLOCK } from "./superblock";
 import { WAL_Manager } from "./wal";
 import type { ManifestEntry, ManifestPage } from "./types";
-
-const PREFIX = 16; // set to 32 if you want 32-byte min/max prefixes
-
-const ENTRY_SIZE = 2 /*level*/ + 2 /*reserved*/ + 8 /*meta_off*/ + 4 /*meta_len*/ + PREFIX + PREFIX; // 48 (with 16-byte prefixes)
-const HEADER_SIZE = 2 /*version*/ + 2 /*reserved*/ + 8 /*epoch*/ + 2 /*count*/ + 2 /*reserved*/;    // 16
-const CAP = Math.floor((BLOCK - HEADER_SIZE) / ENTRY_SIZE);
-export const MANIFEST_OFF = WAL_Manager.J_START + WAL_Manager.J_LENGTH;
+import { BLOCK, PREFIX, ENTRY_SIZE, HEADER_SIZE, CAP, MANIFEST_OFF, MANIFEST_RESULT, DatabaseError } from "./constants";
 
 function encodeManifestEntry(me: ManifestEntry): Uint8Array {
     if (me.minPrefix.length !== PREFIX || me.maxPrefix.length !== PREFIX) {
-        throw new Error(`prefixes must be exactly ${PREFIX} bytes`);
+        throw new DatabaseError(MANIFEST_RESULT.INVALID_PREFIX_SIZE, `prefixes must be exactly ${PREFIX} bytes`);
     }
     const buf = new Uint8Array(ENTRY_SIZE);
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -27,7 +20,7 @@ function encodeManifestEntry(me: ManifestEntry): Uint8Array {
 
 export function encodeManifestPage(mp: ManifestPage): Uint8Array {
     if (mp.entries.length > CAP) {
-        throw new Error(`too many entries: ${mp.entries.length} > cap ${CAP}`);
+        throw new DatabaseError(MANIFEST_RESULT.TOO_MANY_ENTRIES, `too many entries: ${mp.entries.length} > cap ${CAP}`);
     }
     const buf = new Uint8Array(BLOCK);
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -54,7 +47,7 @@ export function encodeManifestPage(mp: ManifestPage): Uint8Array {
 }
 
 export function decodeManifestPage(buf: Uint8Array): ManifestPage {
-    if (buf.length !== BLOCK) throw new Error(`manifest page must be ${BLOCK} bytes`);
+    if (buf.length !== BLOCK) throw new DatabaseError(MANIFEST_RESULT.INVALID_PAGE_SIZE, `manifest page must be ${BLOCK} bytes`);
 
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     let o = 0;
@@ -71,11 +64,11 @@ export function decodeManifestPage(buf: Uint8Array): ManifestPage {
     if (allZero) return { epoch: 0n, version: 0, entries: [] };
 
     if (count > CAP) {
-        throw new Error(`manifest count ${count} exceeds cap ${CAP}`);
+        throw new DatabaseError(MANIFEST_RESULT.COUNT_EXCEEDS_CAP, `manifest count ${count} exceeds cap ${CAP}`);
     }
     const need = HEADER_SIZE + count * ENTRY_SIZE;
     if (need > buf.length) {
-        throw new Error(`manifest corrupt: need ${need}, have ${buf.length}`);
+        throw new DatabaseError(MANIFEST_RESULT.CORRUPT, `manifest corrupt: need ${need}, have ${buf.length}`);
     }
 
     const entries: ManifestEntry[] = [];

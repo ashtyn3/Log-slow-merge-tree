@@ -1,11 +1,5 @@
-export type Op = "set" | "del" | "get" | "check";
-export const OP = { set: 1, del: 2, get: 3, check: 4 } as const;
-export const OP_INV: Record<number, Op> = { 1: "set", 2: "del", 3: "get", 4: "check" };
-
-export const MAX_INFLIGHT = 8;
-
-// LSM Tree types
-export const PREFIX = 16; // set to 32 if you want 32-byte min/max prefixes
+import { OP, OP_INV, MAX_INFLIGHT, PREFIX } from "./constants";
+import type { Op } from "./constants";
 
 export type Extent = { startBlock: number; blocks: number };
 

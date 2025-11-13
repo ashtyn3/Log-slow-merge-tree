@@ -4,31 +4,39 @@ import { LSM } from "./lsm-tree";
 import { TableIO } from "./table";
 import { WAL_Manager } from "./wal.ts";
 import { SuperblockManager } from "./superblock";
-import { type Op, MAX_INFLIGHT } from "./types";
+import type { Op } from "./constants";
+import { MAX_INFLIGHT } from "./constants";
 import { log, LogLevel } from "./utils";
+import type { Clock } from "./clock.ts";
 
 export type Operation = Link<Operation> & {
     op: Op,
     key: string,
     value?: string
-    ts: number,
+    ts: bigint,
     onComplete?: (r: string) => void
 }
 
 export class EventRing {
     private q = new IntrusiveQueue<Operation>();
+    private running: boolean = false
 
 
     constructor(
         private tree: LSM,
         private walManager: WAL_Manager,
         private tio: TableIO,
+        private time: Clock,
         private sbManager?: SuperblockManager,
     ) {
     }
 
+    start() {
+        this.running = true
+    }
+
     dispatch(op: Operation) {
-        op.ts = Bun.nanoseconds();
+        op.ts = this.time.now;
         log(LogLevel.debug, "Operation dispatched", { op: op.op, key: op.key });
         this.q.push(op);
     }
@@ -54,11 +62,11 @@ export class EventRing {
 
 
     async runFor(ms: number) {
-        const ms_dur = (ms * 1000000);
-        const end = Bun.nanoseconds() + ms_dur;
+        const ms_dur = BigInt(ms * 1000000);
+        const end = this.time.now + ms_dur;
 
         while (true) {
-            if (Bun.nanoseconds() >= end) break;
+            if (this.time.now >= end) break;
 
             const batch = this.q.takeUpTo(MAX_INFLIGHT);
 
@@ -90,13 +98,24 @@ export class EventRing {
                 }));
             }
             if (this.tree.needsFlush()) {
-                await this.tio.flushWAL(this.tree.memTable)
+                this.tree.freeze();
                 this.tree.memTable.clear()
-                await this.walManager.checkpoint(this.walManager.getLastLSN(), this.sbManager!)
+                if (this.tree.freezeTable) {
+                    await this.tio.flushWAL(this.tree.freezeTable)
+                    await this.walManager.checkpoint(this.walManager.getLastLSN(), this.sbManager!)
+                }
             }
         }
         // if (this.walManager.isDirty() && this.tree.needsCompaction()) {
         //     await this.walManager.checkpoint(this.walManager.getLastLSN(), this.sbManager!)
         // }
+    }
+
+    async tick() {
+        if (!this.running) return
+
+        await this.runFor(10);
+
+        setImmediate(() => this.tick())
     }
 }

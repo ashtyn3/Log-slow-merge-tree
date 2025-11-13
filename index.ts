@@ -4,8 +4,9 @@ import { WAL_Manager } from "./wal";
 import { LSM } from "./lsm-tree";
 import { EventRing } from "./event-ring";
 import { TableIO, TableReader } from "./table";
-import { extractSortKey16, log, LogLevel } from "./utils";
-import { kWayMerger } from "./k_way_merge_heaper";
+import { J_START } from "./constants";
+import { Clock } from "./clock";
+import { log, LogLevel } from "./utils";
 
 
 const path = "wal.bin";
@@ -18,27 +19,33 @@ try {
 
 const wal = new WAL_Manager(io);
 const sbm = new SuperblockManager(io);
+const time = new Clock()
 let tio = new TableIO(io)
+
 
 const fileSize = await io.size();
 if (fileSize === 0) {
     // First format: ensure size and write both SBs
     await sbm.formatInitial({
-        journalStart: WAL_Manager.J_START,
-        epoch: BigInt(Date.now()),
+        journalStart: J_START,
+        epoch: time.now,
     });
     wal.format(1073741824)
-    await tio.formatInitial({ epoch: BigInt(Date.now()) })
+    await tio.formatInitial({ epoch: time.now })
     // wal.initFrom(WAL_Manager.J_START, WAL_Manager.J_START, 0n);
 } else {
     // Load SB and init WAL tail/head/lsn
     const sb = await sbm.load();
+    time.loadEpoc(sbm)
     tio = await tio.load()
     await wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
 }
 
+
 const t = new LSM(8);
-const er = new EventRing(t, wal, tio, sbm);
+const er = new EventRing(t, wal, tio, time, sbm);
+
+
 if (wal.getUsed() > 0) {
     await t.recover(wal, sbm, er)
 }
@@ -49,7 +56,7 @@ function fill(a: number) {
             op: "set",
             key: `${i}`,
             value: "hi",
-            ts: 0,
+            ts: 0n,
             next: null,
         });
     }
@@ -61,22 +68,26 @@ function set(k: string, v: string) {
         op: "set",
         key: k,
         value: v,
-        ts: 0,
+        ts: 0n,
         next: null,
     });
 }
 
 
-async function proc() {
-    while (true) {
-        await er.runFor(10);
-    }
-}
 
 // set("bob", "steve")
-// set("yo", "steve")
-// fill(8)
-proc()
+// set("yo", "mmmm")
+fill(9)
+
+process.on("SIGINT", async () => {
+    log(LogLevel.info, "Saving state")
+    await sbm.checkpoint({ epoch: time.now })
+    process.exit()
+});
+
+er.start();
+er.tick()
+
 
 
 let readers = []

@@ -1,8 +1,5 @@
 import { FileIO } from "./file-manager";
-
-export const BLOCK = 4096;
-export const SB_A_OFF = 0;
-export const SB_B_OFF = BLOCK;
+import { BLOCK, SB_A_OFF, SB_B_OFF, SUPERBLOCK_RESULT, DatabaseError } from "./constants";
 
 export type Superblock = {
     version: number;          // u16
@@ -79,7 +76,7 @@ export class SuperblockManager {
         const sa = decodeSB(a);
         const sb = decodeSB(b);
 
-        if (!sa && !sb) throw new Error("no valid superblocks");
+        if (!sa && !sb) throw new DatabaseError(SUPERBLOCK_RESULT.NO_VALID_SUPERBLOCKS, "no valid superblocks");
         let chosen: Superblock;
         if (sa && sb) {
             if (sb.epoch > sa.epoch) {
@@ -102,19 +99,20 @@ export class SuperblockManager {
     }
 
     // Persist new checkpoint/journal pointers via A/B flip
-    async checkpoint(update: {
+    async checkpoint(update: Partial<{
         checkpointLSN: bigint;
         jHead: bigint;
         jTail: bigint;
-    }): Promise<void> {
-        if (!this.sb) throw new Error("call load() or formatInitial() first");
+        epoch: bigint
+    }>): Promise<void> {
+        if (!this.sb) throw new DatabaseError(SUPERBLOCK_RESULT.NOT_INITIALIZED, "call load() or formatInitial() first");
         const next: Superblock = {
             version: this.sb.version,
             blockSize: BLOCK,
-            epoch: this.sb.epoch + 1n,
-            checkpointLSN: update.checkpointLSN,
-            jHead: update.jHead,
-            jTail: update.jTail,
+            epoch: update.epoch ?? this.sb.epoch,
+            checkpointLSN: update.checkpointLSN ?? this.sb.checkpointLSN,
+            jHead: update.jHead ?? this.sb.jHead,
+            jTail: update.jTail ?? this.sb.jTail,
         };
         const buf = encodeSB(next);
         const targetOff = this.active === "A" ? SB_B_OFF : SB_A_OFF;

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LOG_LEVEL } from "./constants";
 
 export function extractSortKey16(
     bytes: Uint8Array,
@@ -39,7 +40,9 @@ export enum LogLevel {
 }
 
 export function log(level: LogLevel, message: string, ...args: any[]) {
-    const levelStr = LogLevel[level].toUpperCase();
-    const timestamp = new Date().toISOString();
-    console.error(`${timestamp} ${levelStr}: ${message}`, ...args);
+    if (level >= LOG_LEVEL) {
+        const levelStr = LogLevel[level].toUpperCase();
+        const timestamp = new Date().toISOString();
+        console.error(`${timestamp} ${levelStr}: ${message}`, ...args);
+    }
 }

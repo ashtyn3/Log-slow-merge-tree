@@ -1,16 +1,12 @@
-import type { Op } from "./types";
-import { OP, OP_INV } from "./types";
-import { BLOCK, type FileIO } from "./file-manager";
+import type { Op } from "./constants";
+import { OP, OP_INV } from "./constants";
+import { type FileIO } from "./file-manager";
+import { BLOCK, SB_A_OFF, SB_B_OFF, J_START, J_LENGTH, WAL_RESULT, DatabaseError } from "./constants";
 import type { Operation } from "./event-ring";
 import type { SuperblockManager } from "./superblock";
 import { log, LogLevel } from "./utils";
 
 export class WAL_Manager {
-    static readonly BLOCK = 4096;
-    static readonly SB_A_OFF = 0;
-    static readonly SB_B_OFF = WAL_Manager.BLOCK;
-    static readonly J_START = 2 * WAL_Manager.BLOCK;
-    static readonly J_LENGTH = 256 * 4096;
     lsnToEnd = new Map<bigint, number>();
 
     private alignUp(n: number, a = 8): number {
@@ -32,9 +28,9 @@ export class WAL_Manager {
 
     constructor(
         private file: FileIO,
-        opts: { journalBytes: number; jStart?: number } = { journalBytes: 256 * 4096 },
+        opts: { journalBytes: number; jStart?: number } = { journalBytes: J_LENGTH },
     ) {
-        this.jStart = opts.jStart ?? WAL_Manager.J_START;
+        this.jStart = opts.jStart ?? J_START;
         this.jEnd = this.jStart + opts.journalBytes;
         this.head = this.jStart;
         this.tail = this.jStart;
@@ -141,7 +137,8 @@ export class WAL_Manager {
 
         if (free < needTotal) {
             log(LogLevel.err, "WAL full", { free, need: needTotal, batch: batchBytes, wrap: needsWrap });
-            throw new Error(
+            throw new DatabaseError(
+                WAL_RESULT.WAL_FULL,
                 `WAL full: free=${free} (${(free / BLOCK) | 0} blocks) ` +
                 `need=${needTotal} (${(needTotal / BLOCK) | 0} blocks) ` +
                 `(batch=${batchBytes} wrap=${needsWrap})`,
@@ -176,7 +173,7 @@ export class WAL_Manager {
         const offset = this.lsnToEnd.get(lsn)
         if (offset === undefined) {
             log(LogLevel.err, "Checkpoint failed: LSN not found", { lsn });
-            throw new Error(`cannot checkpoint: LSN ${lsn} not found`);
+            throw new DatabaseError(WAL_RESULT.LSN_NOT_FOUND, `cannot checkpoint: LSN ${lsn} not found`);
         }
         this.head = offset; // may equal jStart if we ended exactly at J_END
         for (const k of this.lsnToEnd.keys()) {

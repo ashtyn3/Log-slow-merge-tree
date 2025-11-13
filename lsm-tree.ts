@@ -1,12 +1,13 @@
-import BTree from "sorted-btree";
+import BTree from "./b_tree/b_tree.ts";
 import { SuperblockManager } from "./superblock";
 import { WAL_Manager } from "./wal";
 import type { EventRing } from "./event-ring";
-import { OP_INV } from "./types";
+import { OP_INV } from "./constants";
 import { log, LogLevel } from "./utils";
 
 export class LSM {
     memTable = new BTree<string, string>();
+    freezeTable: BTree | null = null
     max_size: number;
     recoverFlush: bigint = BigInt(-1)
 
@@ -27,14 +28,8 @@ export class LSM {
                 value: v.value,
                 next: null,
                 ts: 0,
-                onComplete() {
-                    // if (wal.getUsed() > 0) {
-                    //     wal.checkpoint(wal.getLastLSN(), sbm)
-                    // }
-                }
             })
         })
-        // this.recoverFlush = true
     }
 
     async put(er: EventRing, key: string, value: string) {
@@ -46,7 +41,14 @@ export class LSM {
         if (inMem) return this.memTable.get(key);
     }
 
+    freeze() {
+        this.freezeTable = this.memTable.clone()
+        this.freezeTable.freeze()
+    }
     needsFlush() {
-        if (this.memTable.size >= this.max_size) return true
+        if (this.memTable.size >= this.max_size) {
+            return true
+
+        }
     }
 }
