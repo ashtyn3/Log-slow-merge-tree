@@ -4,8 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-      "build": "bun run build.ts",
-      "exec": "./db.out",
+      "build": "rm bin && bun run build.ts",
+      "exec": "./bin",
       "dev": "bun run build && bun run exec"
   },
   "devDependencies": {
