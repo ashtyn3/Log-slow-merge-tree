@@ -8,6 +8,8 @@ const result = await Bun.build({
     packages: "bundle",
     entrypoints: ["./index.ts"],
     compile: true,
+    minify: true,
+    bytecode: true,
     outdir: "bin",
     env: "inline",
     define: {

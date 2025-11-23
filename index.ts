@@ -9,92 +9,98 @@ import { Clock } from "./clock";
 import { log, LogLevel } from "./utils";
 
 
-const path = "wal.bin";
-const io = new FileIO(path);
-try {
-    await io.open("r+");
-} catch {
-    await io.open("w+");
-}
+async function main() {
+    const path = "wal.bin";
+    const io = new FileIO(path);
+    try {
+        await io.open("r+");
+    } catch {
+        await io.open("w+");
+    }
 
-const wal = new WAL_Manager(io);
-const sbm = new SuperblockManager(io);
-const time = new Clock()
-let tio = new TableIO(io)
-
-
-const fileSize = await io.size();
-if (fileSize === 0) {
-    // First format: ensure size and write both SBs
-    await sbm.formatInitial({
-        journalStart: J_START,
-        epoch: time.now,
-    });
-    wal.format(1073741824)
-    await tio.formatInitial({ epoch: time.now })
-    // wal.initFrom(WAL_Manager.J_START, WAL_Manager.J_START, 0n);
-} else {
-    // Load SB and init WAL tail/head/lsn
-    const sb = await sbm.load();
-    time.loadEpoc(sbm)
-    tio = await tio.load()
-    await wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
-}
+    const wal = new WAL_Manager(io);
+    const sbm = new SuperblockManager(io);
+    const time = new Clock()
+    let tio = new TableIO(io)
 
 
-const t = new LSM(8);
-const er = new EventRing(t, wal, tio, time, sbm);
+    const fileSize = await io.size();
+    if (fileSize === 0) {
+        // First format: ensure size and write both SBs
+        await sbm.formatInitial({
+            journalStart: J_START,
+            epoch: time.now,
+        });
+        wal.format(1073741824)
+        await tio.formatInitial({ epoch: time.now })
+        // wal.initFrom(WAL_Manager.J_START, WAL_Manager.J_START, 0n);
+    } else {
+        // Load SB and init WAL tail/head/lsn
+        const sb = await sbm.load();
+        time.loadEpoc(sbm)
+        tio = await tio.load()
+        await wal.initFrom(Number(sb.jHead), Number(sb.jTail), sb.checkpointLSN);
+    }
 
 
-if (wal.getUsed() > 0) {
-    await t.recover(wal, sbm, er)
-}
+    const t = new LSM(8);
+    const er = new EventRing(t, wal, tio, time, sbm);
 
-function fill(a: number) {
-    for (let i = 0; i < a; i++) {
+
+    if (wal.getUsed() > 0) {
+        await t.recover(wal, sbm, er)
+    }
+
+    function fill(a: number) {
+        for (let i = 0; i < a; i++) {
+            er.dispatch({
+                op: "set",
+                key: `${i}`,
+                value: "hi",
+                ts: 0n,
+                next: null,
+            });
+        }
+    }
+
+
+    function set(k: string, v: string) {
         er.dispatch({
             op: "set",
-            key: `${i}`,
-            value: "hi",
+            key: k,
+            value: v,
             ts: 0n,
             next: null,
         });
     }
-}
 
 
-function set(k: string, v: string) {
-    er.dispatch({
-        op: "set",
-        key: k,
-        value: v,
-        ts: 0n,
-        next: null,
+
+    // set("bob", "steve")
+    // set("yo", "mmmm")
+    fill(9)
+
+    process.on("SIGINT", async () => {
+        er.halt()
+        log(LogLevel.info, "Saving state")
+        await sbm.checkpoint({ epoch: time.now })
+        process.exit()
     });
+
+    er.start();
+    er.tick()
+
+
+
+    let readers = []
+    for (const head of await tio.aggHeads(0)) {
+        const tr = new TableReader(io, head)
+        readers.push(tr)
+    }
 }
 
+main()
 
-
-// set("bob", "steve")
-// set("yo", "mmmm")
-fill(9)
-
-process.on("SIGINT", async () => {
-    log(LogLevel.info, "Saving state")
-    await sbm.checkpoint({ epoch: time.now })
-    process.exit()
-});
-
-er.start();
-er.tick()
-
-
-
-let readers = []
-for (const head of await tio.aggHeads(0)) {
-    const tr = new TableReader(io, head)
-    readers.push(tr)
-}
 // console.log(await tio.levelSize(0))
 //
 // for await (const b of kWayMerger(readers)) {

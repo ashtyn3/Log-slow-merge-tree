@@ -35,6 +35,10 @@ export class EventRing {
         this.running = true
     }
 
+    halt() {
+        this.running = false
+    }
+
     dispatch(op: Operation) {
         op.ts = this.time.now;
         log(LogLevel.debug, "Operation dispatched", { op: op.op, key: op.key });
